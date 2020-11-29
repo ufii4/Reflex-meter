@@ -52,6 +52,7 @@ NVIC_IABR1	EQU	0x300
 ;----- Other constants
 RAND_SEED	EQU 0x2F1
 DELAY_CNT	EQU 8000
+BUTTON_MSK	EQU 0x00002000
 
 ;********************* Static variable declarations ***************************
 RAND_DATA	EQU 0x20000000 ;Reserve address for random number
@@ -196,16 +197,72 @@ BCD_TEST	EQU 0x1234
 	STR		R0,[R1, #EXTI_IMR] ; Write back EXTI_IMR Register
 	
 main_loop
+	LDR	R1,=GPIOC_MODER
+	MOV	R0, #0x6  ; RGB RED/ON
+	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
+	LDR	R1,=GPIOA_MODER
+	MOV	R0, #0xAAAA  ; Write AAAA to display
+	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
 	
-	NOP ; You code from Lab3 goes here. Don't forget your subroutines in the
-		; subroutines section. The ERQ is masked, so your code should work
-		; as when submitted for Lab3. Once the code is up and working you
-		; can start making modifications to remove perioci polling and use
-		; interrupts.
+TryGetRandom	; Generate a random number in between [2000,10000]
+	BL	Rand
+	CMP	R8, #2000
+	BLT	TryGetRandom
+	MOV R0, #10000	; I wonder why I can't just compare R8 with #10000, it shows error A1871E.
+	CMP	R8, R0
+	BGT	TryGetRandom
+	
+	MOV	R0, R8
+	BL	DelayN
+	
+	LDR	R1,=GPIOC_MODER
+	MOV	R0, #0x5  ; RGB GREEN/ON
+	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
+	
+	MOV	R3, #0
+CountReactionTime
+	ADD R3, #1	; Increment reaction time by 1ms
+	MOV R0, #1
+	BL	DelayN
+	LDR R1,=GPIOC_MODER
+	LDR R0,[R1,#GPIO_IDR]	; Read the button input
+	AND	R0,R0,#BUTTON_MSK
+	CMP R0,#BUTTON_MSK
+	BEQ	CountReactionTime
 
+	LDR	R1,=GPIOC_MODER
+	MOV	R0, #0x3  ; RGB BLUE/ON
+	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
+	MOV	R0,R3
+	BL	BinToBCD
+	LDR	R1,=GPIOA_MODER
+	MOV	R0,R8
+	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
+	MOV	R0, #5000
+	
+	BL	DelayN	;create a delay of five seconds
 	B	main_loop ;Also end of main program
 	
-;------------------------------------------------------------------------------	
+
+
+;------------------------------------------------------------------------------
+
+; ********************************** DelayN ***********************************
+; Adapted from Lab2
+; Input:  R0 DelayMultiplier. Assume R0>0
+; Output: No output
+
+DelayN
+		STMFD		R13!,{R14}
+		MOV			R12,#DELAY_CNT
+		MUL			R0,R12 
+Delayloop	;The loop that creates the delay
+		SUBS		R0, #1
+		BNE			Delayloop
+		
+		LDMFD		R13!,{R15}
+
+;------------------------------------------------------------------------------
 	
 	
 ;************************* Pseudo Random Num Gen ******************************
