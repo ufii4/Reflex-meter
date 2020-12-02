@@ -208,7 +208,7 @@ TryGetRandom	; Generate a random number in between [2000,10000]
 	BL	Rand
 	CMP	R8, #2000
 	BLT	TryGetRandom
-	MOV R0, #10000	; I wonder why I can't just compare R8 with #10000, it shows error A1871E.
+	MOV R0, #10000
 	CMP	R8, R0
 	BGT	TryGetRandom
 	
@@ -219,28 +219,60 @@ TryGetRandom	; Generate a random number in between [2000,10000]
 	MOV	R0, #0x5  ; RGB GREEN/ON
 	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
 	
+	;---Set interrupt priority according to SMT34F4xx documentation
+	LDR		R1,=NVIC ;Load address for NVIC_IPR10: priority register
+	MOV		R0,#47
+	STRB	R0,[R1, #NVIC_IPR10]
+	
+	;---IRQ mask is on the NVIC controller. 
+	LDR		R1,=NVIC ; Load address for NVIC_ISERC: Interrupt enable register
+	LDR		R0,[R1, #NVIC_ISER1]
+	ORR		R0, R0, #0X100 ;Enable Interrupt 40 leave other configurations intact
+	STR		R0,[R1, #NVIC_ISER1]
+ 
+	;ERQ mask is on the EXTI controller 
+	LDR		R1,=EXTI ; Load EXTI_EMR Register
+	LDR		R0,[R1, #EXTI_IMR] ; Load EXTI_IMR Register
+	ORR		R0,R0,#BUTTON_MSK ;Set bit to unmask ERQ, clear to mask ERQ
+	STR		R0,[R1, #EXTI_IMR] ; Write back EXTI_IMR Register
+	
 	MOV	R3, #0
 CountReactionTime
 	ADD R3, #1	; Increment reaction time by 1ms
 	MOV R0, #1
 	BL	DelayN
-	LDR R1,=GPIOC_MODER
-	LDR R0,[R1,#GPIO_IDR]	; Read the button input
-	AND	R0,R0,#BUTTON_MSK
-	CMP R0,#BUTTON_MSK
+	LDR R0, =BTN_FLAG
+	LDR R0,[R0]
+	TEQ R0, #0
 	BEQ	CountReactionTime
-
+	
+	; clear the flag set by ISR
+	MOV R0,	#0 
+	LDR	R1,	=BTN_FLAG  
+	STR	R0,[R1]		   
+ 
+	; Mask the ERQ to disable the trigger
+	LDR		R1,=EXTI ; Load EXTI_EMR Register
+	LDR		R0,[R1, #EXTI_IMR] ; Load EXTI_IMR Register
+	AND		R0,R0,#0xFFFFDFFF ;Set bit to unmask ERQ, clear to mask ERQ
+	STR		R0,[R1, #EXTI_IMR] ; Write back EXTI_IMR Register
+	
+	;	Turn the LED blue
 	LDR	R1,=GPIOC_MODER
 	MOV	R0, #0x3  ; RGB BLUE/ON
 	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
+	
+	;	Display the reaction time
 	MOV	R0,R3
 	BL	BinToBCD
 	LDR	R1,=GPIOA_MODER
 	MOV	R0,R8
 	STR	R0, [R1, #GPIO_ODR]	; Write back the data to output data register
-	MOV	R0, #5000
 	
-	BL	DelayN	;create a delay of five seconds
+	;create a delay of five seconds
+	MOV	R0, #5000
+	BL	DelayN	
+	
 	B	main_loop ;Also end of main program
 	
 
@@ -439,13 +471,15 @@ BCD_return
 EXTI15_10_IRQHandler PROC
 	STMFD		R13!,{R14}
 					
-	NOP ; Your code goes here			
-				
+	MOV R7,	#1 ; Flag: '1': Button Pressed; '0': Button serviced or never pressed 
+	LDR	R8,	=BTN_FLAG  ; load the address of the static variable
+	STR	R7,[R8]		   ; Store the button flag in memory	
+					
 	; Clear the interrupt flag as the last steo in IRS handling
 	LDR	R1,=EXTI ; Load EXTI_EMR Register
 	MOV	R0,#0x0002000 ;Set bit to clear interrupt
 	STR	R0,[R1, #EXTI_PR] ; Write back EXTI_EMR Register
-
+	
 	LDMFD	R13!,{R15}
 	ENDP
 ;------------------------------------------------------------------------------	
